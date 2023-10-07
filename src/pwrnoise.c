@@ -262,7 +262,7 @@ void pwrnoise_step(power_noise_t *pn, int16_t *left, int16_t *right) {
 		pwrnoise_noise_step(&pn->n1);
 		pwrnoise_noise_step(&pn->n2);
 		pwrnoise_noise_step(&pn->n3);
-		pwrnoise_slope_step(&pn->s, (pn->n1.am && !(pn->n1.out_latch)) || (pn->n2.am && !(pn->n2.out_latch)) || (pn->n3.am && !(pn->n3.out_latch)));
+		pwrnoise_slope_step(&pn->s, (pn->n1.am && !(pn->n1.prev)) || (pn->n2.am && !(pn->n2.prev)) || (pn->n3.am && !(pn->n3.prev)));
 		
 		final_left = (pn->n1.out_latch >> 4) + (pn->n2.out_latch >> 4) + (pn->n3.out_latch >> 4) + (pn->s.out_latch >> 4);
 		final_right = (pn->n1.out_latch & 0xf) + (pn->n2.out_latch & 0xf) + (pn->n3.out_latch & 0xf) + (pn->s.out_latch & 0xf);
