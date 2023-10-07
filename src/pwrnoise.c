@@ -64,7 +64,7 @@ void pwrnoise_noise_write(noise_channel_t *chan, uint8_t reg, uint8_t val) {
 	}
 }
 
-void pwrnoise_noise_step(noise_channel_t *chan, bool slope_enable) {
+void pwrnoise_noise_step(noise_channel_t *chan) {
 	if (chan->enable && !((chan->octave_counter++ >> chan->octave) & 0x0001) && ((chan->octave_counter >> chan->octave) & 0x0001)) {
 		if ((++chan->period_counter) == 4096) {
 			chan->prev = (uint8_t)(chan->lfsr & 0x0001);
@@ -75,7 +75,7 @@ void pwrnoise_noise_step(noise_channel_t *chan, bool slope_enable) {
 	}
 	
 	uint8_t out = chan->prev;
-	if (!chan->enable || (chan->am && !slope_enable)) out = 0;
+	if (!chan->enable) out = 0;
 	else if (out != 0) out = chan->vol;
 	
 	chan->out_latch = out;
@@ -144,7 +144,7 @@ void pwrnoise_slope_write(slope_channel_t *chan, uint8_t reg, uint8_t val) {
 	}
 }
 
-void pwrnoise_slope_step(slope_channel_t *chan) {
+void pwrnoise_slope_step(slope_channel_t *chan, bool force_zero) {
 	if (chan->enable && !((chan->octave_counter++ >> chan->octave) & 0x0001) && ((chan->octave_counter >> chan->octave) & 0x0001)) {
 		if ((++chan->period_counter) == 4096) {
 			if (!chan->portion) {
@@ -214,7 +214,7 @@ void pwrnoise_slope_step(slope_channel_t *chan) {
 	right &= (chan->vol & 0xf);
 	uint8_t out = (left << 4) | right;
 	
-	if (!chan->enable) out = 0;
+	if (!chan->enable || force_zero) out = 0;
 	chan->out_latch = out;
 }
 
@@ -259,10 +259,10 @@ void pwrnoise_step(power_noise_t *pn, int16_t *left, int16_t *right) {
 	int32_t final_left, final_right;
 	
 	if ((pn->flags & 0x80) != 0) {
-		pwrnoise_noise_step(&pn->n1, pn->s.enable);
-		pwrnoise_noise_step(&pn->n2, pn->s.enable);
-		pwrnoise_noise_step(&pn->n3, pn->s.enable);
-		pwrnoise_slope_step(&pn->s);
+		pwrnoise_noise_step(&pn->n1);
+		pwrnoise_noise_step(&pn->n2);
+		pwrnoise_noise_step(&pn->n3);
+		pwrnoise_slope_step(&pn->s, (pn->n1.am && !(pn->n1.out_latch)) || (pn->n2.am && !(pn->n2.out_latch)) || (pn->n3.am && !(pn->n3.out_latch)));
 		
 		final_left = (pn->n1.out_latch >> 4) + (pn->n2.out_latch >> 4) + (pn->n3.out_latch >> 4) + (pn->s.out_latch >> 4);
 		final_right = (pn->n1.out_latch & 0xf) + (pn->n2.out_latch & 0xf) + (pn->n3.out_latch & 0xf) + (pn->s.out_latch & 0xf);
