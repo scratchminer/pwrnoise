@@ -164,7 +164,7 @@ void pwrnoise_slope_step(slope_channel_t *chan, bool force_zero) {
 				if ((chan->flags & 0x01) != 0) chan->accum -= chan->boffset;
 				else chan->accum += chan->boffset;
 				
-				if ((chan->flags & 0x10) != 0 && chan->accum > 0x7f) chan->accum = (chan->flags & 0x02) ? 0x00 : 0x7f;
+				if ((chan->flags & 0x10) != 0 && chan->accum > 0x7f) chan->accum = (chan->flags & 0x01) ? 0x00 : 0x7f;
 				chan->accum &= 0x7f;
 				
 				if (++chan->b > chan->blength) {
