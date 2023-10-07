@@ -1,0 +1,402 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+
+#include <SDL.h>
+#include "blip_buf.h"
+
+typedef uint8_t bool;
+#define TRUE 1
+#define FALSE 0
+
+static blip_t *blip_left;
+static blip_t *blip_right;
+
+typedef struct {
+	bool enable;
+	bool am;
+	
+	uint16_t period;
+	uint16_t period_counter;
+	
+	uint8_t octave;
+	uint16_t octave_counter;
+	
+	uint8_t tapa;
+	uint8_t tapb;
+	bool tapb_enable;
+	
+	uint16_t lfsr;
+	uint8_t vol;
+	
+	uint8_t out_latch;
+	uint8_t prev;
+} noise_channel_t;
+
+void pwrnoise_noise_write(noise_channel_t *chan, uint8_t reg, uint8_t val) {
+	switch (reg & 0x1f) {
+		case 1:
+			chan->enable = (val & 0x80) != 0;
+			chan->am = (val & 0x02) != 0;
+			chan->tapb_enable = (val & 0x01) != 0;
+			break;
+		case 2:
+			chan->period = (chan->period & 0xf00) | val;
+			break;
+		case 3:
+			chan->period = (chan->period & 0xff) | ((uint16_t)val << 8) & 0xf00;
+			chan->octave = val >> 4;
+			break;
+		case 4:
+			chan->lfsr = (chan->lfsr & 0xff00) | val;
+			break;
+		case 5:
+			chan->lfsr = (chan->lfsr & 0x00ff) | ((uint16_t)val << 8);
+			break;
+		case 6:
+			chan->tapa = val >> 4;
+			chan->tapb = val & 0x0f;
+			break;
+		case 7:
+			chan->vol = val;
+			break;
+		default: break;
+	}
+}
+
+void pwrnoise_noise_step(noise_channel_t *chan, bool slope_enable) {
+	if (chan->enable && !((chan->octave_counter++ >> chan->octave) & 0x0001) && ((chan->octave_counter >> chan->octave) & 0x0001)) {
+		if ((++chan->period_counter) == 4096) {
+			chan->prev = (uint8_t)(chan->lfsr & 0x0001);
+			uint16_t in = ((chan->lfsr >> chan->tapa) ^ (chan->tapb_enable ? (chan->lfsr >> chan->tapb) : 0)) & 0x0001;
+			chan->lfsr = (chan->lfsr << 1) | in;
+			chan->period_counter = chan->period;
+		}
+	}
+	
+	uint8_t out = chan->prev;
+	if (!chan->enable || (chan->am && !slope_enable)) out = 0;
+	else if (out != 0) out = chan->vol;
+	
+	chan->out_latch = out;
+}
+
+typedef struct {
+	bool enable;
+	uint8_t flags;
+	
+	uint16_t period;
+	uint16_t period_counter;
+	
+	uint8_t octave;
+	uint16_t octave_counter;
+	
+	uint8_t alength;
+	uint8_t blength;
+	uint8_t a;
+	uint8_t b;
+	bool portion;
+	
+	uint8_t aoffset;
+	uint8_t boffset;
+	
+	uint8_t accum;
+	uint8_t vol;
+	
+	uint8_t out_latch;
+} slope_channel_t;
+
+void pwrnoise_slope_write(slope_channel_t *chan, uint8_t reg, uint8_t val) {
+	switch (reg & 0x1f) {
+		case 0:
+			chan->accum = val & 0x7f;
+			break;
+		case 1:
+			chan->enable = (val & 0x80) != 0;
+			if ((val & 0x40) != 0) {
+				chan->a = 0;
+				chan->b = 0;
+				chan->portion = FALSE;
+			}
+			chan->flags = val & 0x3f;
+			break;
+		case 2:
+			chan->period = (chan->period & 0xf00) | val;
+			break;
+		case 3:
+			chan->period = (chan->period & 0xff) | ((uint16_t)val << 8) & 0xf00;
+			chan->octave = val >> 4;
+			break;
+		case 4:
+			chan->alength = val;
+			break;
+		case 5:
+			chan->blength = val;
+			break;
+		case 6:
+			chan->aoffset = val >> 4;
+			chan->boffset = val & 0x0f;
+			break;
+		case 7:
+			chan->vol = val;
+			break;
+		default: break;
+	}
+}
+
+void pwrnoise_slope_step(slope_channel_t *chan) {
+	if (chan->enable && !((chan->octave_counter++ >> chan->octave) & 0x0001) && ((chan->octave_counter >> chan->octave) & 0x0001)) {
+		if ((++chan->period_counter) == 4096) {
+			if (!chan->portion) {
+				if ((chan->flags & 0x02) != 0) chan->accum -= chan->aoffset;
+				else chan->accum += chan->aoffset;
+				
+				if ((chan->flags & 0x20) != 0 && chan->accum > 0x7f) chan->accum = (chan->flags & 0x02) ? 0x00 : 0x7f;
+				chan->accum &= 0x7f;
+				
+				if (++chan->a > chan->alength) {
+					if ((chan->flags & 0x08) != 0) chan->accum = (chan->flags & 0x02) ? 0x7f : 0x00;
+					chan->b = 0x00;
+					chan->portion = TRUE;
+				}
+			}
+			else {
+				if ((chan->flags & 0x01) != 0) chan->accum -= chan->boffset;
+				else chan->accum += chan->boffset;
+				
+				if ((chan->flags & 0x10) != 0 && chan->accum > 0x7f) chan->accum = (chan->flags & 0x02) ? 0x00 : 0x7f;
+				chan->accum &= 0x7f;
+				
+				if (++chan->b > chan->blength) {
+					if ((chan->flags & 0x04) != 0) chan->accum = (chan->flags & 0x01) ? 0x7f : 0x00;
+					chan->a = 0x00;
+					chan->portion = FALSE;
+				}
+			}
+			
+			chan->period_counter = chan->period;
+		}
+	}
+	
+	uint8_t left = chan->accum >> 3;
+	uint8_t right = chan->accum >> 3;
+	
+	switch (chan->vol >> 4) {
+		case 0:
+		case 1:
+			left >>= 1;
+		case 2:
+		case 3:
+			left >>= 1;
+		case 4:
+		case 5:
+		case 6:
+		case 7:
+			left >>= 1;
+		default: break;
+	}
+	switch (chan->vol & 0xf) {
+		case 0:
+		case 1:
+			right >>= 1;
+		case 2:
+		case 3:
+			right >>= 1;
+		case 4:
+		case 5:
+		case 6:
+		case 7:
+			right >>= 1;
+		default: break;
+	}
+	
+	left &= (chan->vol >> 4);
+	right &= (chan->vol & 0xf);
+	uint8_t out = (left << 4) | right;
+	
+	if (!chan->enable) out = 0;
+	chan->out_latch = out;
+}
+
+typedef struct {
+	uint8_t flags;
+	uint8_t gpioa;
+	uint8_t gpiob;
+	
+	noise_channel_t n1;
+	noise_channel_t n2;
+	noise_channel_t n3;
+	slope_channel_t s;
+} power_noise_t;
+
+void pwrnoise_write(power_noise_t *pn, uint8_t reg, uint8_t val) {
+	reg &= 0x1f;
+	
+	if (reg == 0x00) {
+		pn->flags = val;
+	}
+	else if (reg == 0x08 && !(pn->flags & 0x20)) {
+		pn->gpioa = val;
+	}
+	else if (reg == 0x10 && !(pn->flags & 0x40)) {
+		pn->gpiob = val;
+	}
+	else if (reg < 0x08) {
+		pwrnoise_noise_write(&pn->n1, reg % 8, val);
+	}
+	else if (reg < 0x10) {
+		pwrnoise_noise_write(&pn->n2, reg % 8, val);
+	}
+	else if (reg < 0x18) {
+		pwrnoise_noise_write(&pn->n3, reg % 8, val);
+	}
+	else {
+		pwrnoise_slope_write(&pn->s, reg % 8, val);
+	}
+}
+
+void pwrnoise_step(power_noise_t *pn, int16_t *left, int16_t *right) {
+	int32_t final_left, final_right;
+	
+	if ((pn->flags & 0x80) != 0) {
+		pwrnoise_noise_step(&pn->n1, pn->s.enable);
+		pwrnoise_noise_step(&pn->n2, pn->s.enable);
+		pwrnoise_noise_step(&pn->n3, pn->s.enable);
+		pwrnoise_slope_step(&pn->s);
+		
+		final_left = (pn->n1.out_latch >> 4) + (pn->n2.out_latch >> 4) + (pn->n3.out_latch >> 4) + (pn->s.out_latch >> 4);
+		final_right = (pn->n1.out_latch & 0xf) + (pn->n2.out_latch & 0xf) + (pn->n3.out_latch & 0xf) + (pn->s.out_latch & 0xf);
+	}
+	else {
+		final_left = 0;
+		final_right = 0;
+	}
+	
+	*left = (int16_t)(final_left * 65535 / 60 - 32708);
+	*right = (int16_t)(final_right * 65535 / 60 - 32708);
+}
+
+int main(int argc, char **argv) {
+	if (argc < 1) {
+		printf("Usage: pwrnoise (file name)\n");
+		return 1;
+	}
+	
+	const char *filename = argv[1];
+	FILE *fh = fopen(filename, "r");
+	
+	if (fh == NULL) {
+		printf("Error: the file could not be opened. Does it exist?\n");
+		return 1;
+	}
+	
+	char magic[8];
+	int size = fread(magic, 1, 8, fh);
+	if (size != 8) {
+		printf("Error: encountered EOF while reading signature\n");
+		return 1;
+	}
+	if(strncmp(magic, "PWRNOISE", 8)) {
+		printf("Error: encountered incorrect signature (should be 'PWRNOISE')\n");
+		return 1;
+	}
+	
+	uint32_t clock_rate;
+	size = fread(&clock_rate, 4, 1, fh);
+	if (size != 1) {
+		printf("Error: encountered EOF while reading clock rate\n");
+		return 1;
+	}
+	
+	if(SDL_Init(SDL_INIT_AUDIO)) {
+		printf("Error: unable to initialize SDL");
+		return 1;
+	}
+	
+	blip_left = blip_new(4096);
+	blip_right = blip_new(4096);
+	blip_set_rates(blip_left, clock_rate, 44100.0);
+	blip_set_rates(blip_right, clock_rate, 44100.0);
+	
+	power_noise_t pn;
+	memset(&pn, 0, sizeof(pn));
+	
+	uint32_t sleep_cyc = 0;
+	
+	int16_t prev_left = 0;
+	int16_t prev_right = 0;
+	
+	SDL_AudioSpec want;
+	SDL_zero(want);
+	want.freq = 44100;
+	want.format = AUDIO_S16LSB;
+	want.channels = 2;
+	want.samples = 512;
+	
+	SDL_AudioDeviceID dev = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
+	SDL_PauseAudioDevice(dev, 0);
+	
+	short aud_data[1024];
+	
+	while (1) {
+		for (int cyc = 0; cyc < 4096; cyc++) {
+			if (sleep_cyc > 0) sleep_cyc--;
+			else {
+				uint8_t reg, val;
+				size = fread(&reg, 1, 1, fh);
+				if (size != 1) {
+					SDL_PauseAudioDevice(dev, 1);
+					SDL_CloseAudioDevice(dev);
+					blip_delete(blip_left);
+					blip_delete(blip_right);
+					fclose(fh);
+					SDL_Quit();
+					return 0;
+				}
+				
+				if (reg == 0xff) {
+					size = fread(&sleep_cyc, 3, 1, fh);
+					if (size != 1) {
+						SDL_PauseAudioDevice(dev, 1);
+						SDL_CloseAudioDevice(dev);
+						blip_delete(blip_left);
+						blip_delete(blip_right);
+						fclose(fh);
+						SDL_Quit();
+						return 0;
+					}
+					sleep_cyc &= 0xffffff;
+				}
+				else {
+					size = fread(&val, 1, 1, fh);
+					if (size != 1) {
+						SDL_PauseAudioDevice(dev, 1);
+						SDL_CloseAudioDevice(dev);
+						blip_delete(blip_left);
+						blip_delete(blip_right);
+						fclose(fh);
+						SDL_Quit();
+						return 0;
+					}
+					pwrnoise_write(&pn, reg, val);
+				}
+			}
+			
+			int16_t left, right;
+			pwrnoise_step(&pn, &left, &right);
+			
+			blip_add_delta_fast(blip_left, cyc, left - prev_left);
+			prev_left = left;
+			blip_add_delta_fast(blip_right, cyc, right - prev_right);
+			prev_right = right;
+		}
+		
+		blip_end_frame(blip_left, 4095);
+		blip_end_frame(blip_right, 4095);
+		
+		int lsz = blip_read_samples(blip_left, aud_data, 512, 1);
+		int rsz = blip_read_samples(blip_right, aud_data + 1, 512, 1);
+		int len = ((lsz > rsz) ? lsz : rsz) * 2 * sizeof(short);
+		SDL_QueueAudio(dev, aud_data, len);
+	}
+}
