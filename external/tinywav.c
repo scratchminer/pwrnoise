@@ -184,26 +184,26 @@ int tinywav_write_f(TinyWav *tw, void *f, int len) {
       int16_t *z = (int16_t *) alloca(tw->numChannels*len*sizeof(int16_t));
       switch (tw->chanFmt) {
         case TW_INTERLEAVED: {
-          const float *const x = (const float *const) f;
+	  const int16_t *const x = (const int16_t *const) f;
           for (int i = 0; i < tw->numChannels*len; ++i) {
-            z[i] = (int16_t) (x[i] * (float) INT16_MAX);
+            z[i] = (int16_t) (x[i]);
           }
           break;
         }
         case TW_INLINE: {
-          const float *const x = (const float *const) f;
+	  const int16_t *const x = (const int16_t *const) f;
           for (int i = 0, k = 0; i < len; ++i) {
             for (int j = 0; j < tw->numChannels; ++j) {
-              z[k++] = (int16_t) (x[j*len+i] * (float) INT16_MAX);
+              z[k++] = (int16_t) (x[j*len+i]);
             }
           }
           break;
         }
         case TW_SPLIT: {
-          const float **const x = (const float **const) f;
+          const int16_t **const x = (const int16_t **const) f;
           for (int i = 0, k = 0; i < len; ++i) {
             for (int j = 0; j < tw->numChannels; ++j) {
-              z[k++] = (int16_t) (x[j][i] * (float) INT16_MAX);
+              z[k++] = (int16_t) (x[j][i]);
             }
           }
           break;
