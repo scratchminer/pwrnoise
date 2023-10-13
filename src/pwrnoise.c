@@ -326,21 +326,12 @@ int main(int argc, const char **argv) {
 	int16_t prev_left = 0;
 	int16_t prev_right = 0;
 	
-	SDL_AudioSpec want;
-	SDL_zero(want);
-	want.freq = 44100;
-	want.format = AUDIO_S16LSB;
-	want.channels = 2;
-	want.samples = 512;
-	
-	SDL_AudioDeviceID dev = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
-	SDL_PauseAudioDevice(dev, 0);
-	
 	TinyWav out;
+	SDL_AudioDeviceID dev;
 	
 	if(argc > 2) {
 		if (tinywav_open_write(&out, 2, 44100, TW_INT16, TW_INTERLEAVED, argv[2])) {
-			printf("Warning: output file could not be opened, proceeding without it\n");
+			printf("Warning: output file could not be opened, playing track instead\n");
 			outFile = false;
 		}
 		else {
@@ -348,6 +339,15 @@ int main(int argc, const char **argv) {
 		}
 	}
 	else {
+		SDL_AudioSpec want;
+		SDL_zero(want);
+		want.freq = 44100;
+		want.format = AUDIO_S16LSB;
+		want.channels = 2;
+		want.samples = 512;
+		
+		dev = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
+		SDL_PauseAudioDevice(dev, 0);
 		outFile = false;
 	}
 	
@@ -360,28 +360,36 @@ int main(int argc, const char **argv) {
 				uint8_t reg, val;
 				size = fread(&reg, 1, 1, fh);
 				if (size != 1) {
-					do {} while(SDL_GetQueuedAudioSize(dev) > 0);
-					SDL_PauseAudioDevice(dev, 1);
-					SDL_CloseAudioDevice(dev);
+					if (outFile) {
+						tinywav_close_write(&out);
+					}
+					else {
+						do {} while(SDL_GetQueuedAudioSize(dev) > 0);
+						SDL_PauseAudioDevice(dev, 1);
+						SDL_CloseAudioDevice(dev);
+						SDL_Quit();
+					}
 					blip_delete(blip_left);
 					blip_delete(blip_right);
 					fclose(fh);
-					if (outFile) tinywav_close_write(&out);
-					SDL_Quit();
 					return 0;
 				}
 				
 				if (reg == 0xff) {
 					size = fread(&sleep_cyc, 3, 1, fh);
 					if (size != 1) {
-						do {} while(SDL_GetQueuedAudioSize(dev) > 0);
-						SDL_PauseAudioDevice(dev, 1);
-						SDL_CloseAudioDevice(dev);
+						if (outFile) {
+							tinywav_close_write(&out);
+						}
+						else {
+							do {} while(SDL_GetQueuedAudioSize(dev) > 0);
+							SDL_PauseAudioDevice(dev, 1);
+							SDL_CloseAudioDevice(dev);
+							SDL_Quit();
+						}
 						blip_delete(blip_left);
 						blip_delete(blip_right);
 						fclose(fh);
-						if (outFile) tinywav_close_write(&out);
-						SDL_Quit();
 						return 0;
 					}
 					sleep_cyc &= 0xffffff;
@@ -389,14 +397,18 @@ int main(int argc, const char **argv) {
 				else {
 					size = fread(&val, 1, 1, fh);
 					if (size != 1) {
-						do {} while(SDL_GetQueuedAudioSize(dev) > 0);
-						SDL_PauseAudioDevice(dev, 1);
-						SDL_CloseAudioDevice(dev);
+						if (outFile) {
+							tinywav_close_write(&out);
+						}
+						else {
+							do {} while(SDL_GetQueuedAudioSize(dev) > 0);
+							SDL_PauseAudioDevice(dev, 1);
+							SDL_CloseAudioDevice(dev);
+							SDL_Quit();
+						}
 						blip_delete(blip_left);
 						blip_delete(blip_right);
 						fclose(fh);
-						if (outFile) tinywav_close_write(&out);
-						SDL_Quit();
 						return 0;
 					}
 					pwrnoise_write(&pn, reg, val);
@@ -418,8 +430,8 @@ int main(int argc, const char **argv) {
 		int lsz = blip_read_samples(blip_left, aud_data, 512, 1);
 		int rsz = blip_read_samples(blip_right, aud_data + 1, 512, 1);
 		int sz = ((lsz > rsz) ? lsz : rsz);
-		SDL_QueueAudio(dev, aud_data, sz * 2 * sizeof(short));
 		
 		if (outFile) tinywav_write_f(&out, aud_data, sz);
+		else SDL_QueueAudio(dev, aud_data, sz * 2 * sizeof(short));
 	}
 }
