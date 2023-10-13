@@ -68,7 +68,7 @@ void pwrnoise_noise_step(noise_channel_t *chan) {
 	if (chan->enable && !((chan->octave_counter++ >> chan->octave) & 0x0001) && ((chan->octave_counter >> chan->octave) & 0x0001)) {
 		if ((++chan->period_counter) == 4096) {
 			chan->prev = (uint8_t)(chan->lfsr & 0x0001);
-			uint16_t in = ((chan->lfsr >> (15 - chan->tapa)) ^ (chan->tapb_enable ? (chan->lfsr >> (15 - chan->tapb)) : 0)) & 0x0001;
+			uint16_t in = ((chan->lfsr >> chan->tapa) ^ (chan->tapb_enable ? (chan->lfsr >> chan->tapb) : 0)) & 0x0001;
 			chan->lfsr = (chan->lfsr << 1) | in;
 			chan->period_counter = chan->period;
 		}
