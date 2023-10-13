@@ -1,16 +1,15 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdlib.h>
 
 #include <SDL.h>
-#include "blip_buf.h"
-
-typedef uint8_t bool;
-#define TRUE 1
-#define FALSE 0
+#include <blip_buf.h>
+#include <tinywav.h>
 
 static blip_t *blip_left;
 static blip_t *blip_right;
+static bool outFile;
 
 typedef struct {
 	bool enable;
@@ -65,9 +64,10 @@ void pwrnoise_noise_write(noise_channel_t *chan, uint8_t reg, uint8_t val) {
 }
 
 void pwrnoise_noise_step(noise_channel_t *chan) {
-	if (chan->enable && !((chan->octave_counter++ >> chan->octave) & 0x0001) && ((chan->octave_counter >> chan->octave) & 0x0001)) {
+	chan->octave_counter++;
+	if (chan->enable && !(((chan->octave_counter - 1) >> chan->octave) & 0x0001) && ((chan->octave_counter >> chan->octave) & 0x0001)) {
 		if ((++chan->period_counter) == 4096) {
-			chan->prev = (uint8_t)(chan->lfsr & 0x0001);
+			chan->prev = (uint8_t)(chan->lfsr >> 15);
 			uint16_t in = ((chan->lfsr >> chan->tapa) ^ (chan->tapb_enable ? (chan->lfsr >> chan->tapb) : 0)) & 0x0001;
 			chan->lfsr = (chan->lfsr << 1) | in;
 			chan->period_counter = chan->period;
@@ -116,7 +116,7 @@ void pwrnoise_slope_write(slope_channel_t *chan, uint8_t reg, uint8_t val) {
 			if ((val & 0x40) != 0) {
 				chan->a = 0;
 				chan->b = 0;
-				chan->portion = FALSE;
+				chan->portion = false;
 			}
 			chan->flags = val & 0x3f;
 			break;
@@ -157,7 +157,7 @@ void pwrnoise_slope_step(slope_channel_t *chan, bool force_zero) {
 				if (++chan->a > chan->alength) {
 					if ((chan->flags & 0x04) != 0) chan->accum = (chan->flags & 0x02) ? 0x7f : 0x00;
 					chan->b = 0x00;
-					chan->portion = TRUE;
+					chan->portion = true;
 				}
 			}
 			else {
@@ -170,7 +170,7 @@ void pwrnoise_slope_step(slope_channel_t *chan, bool force_zero) {
 				if (++chan->b > chan->blength) {
 					if ((chan->flags & 0x08) != 0) chan->accum = (chan->flags & 0x01) ? 0x7f : 0x00;
 					chan->a = 0x00;
-					chan->portion = FALSE;
+					chan->portion = false;
 				}
 			}
 			
@@ -276,9 +276,9 @@ void pwrnoise_step(power_noise_t *pn, int16_t *left, int16_t *right) {
 	*right = (int16_t)(final_right * 65535 / 60 - 32708);
 }
 
-int main(int argc, char **argv) {
-	if (argc < 1) {
-		printf("Usage: pwrnoise (file name)\n");
+int main(int argc, const char **argv) {
+	if (argc < 2) {
+		printf("Usage: pwrnoise (file name) [output WAV file name]\n");
 		return 1;
 	}
 	
@@ -315,8 +315,8 @@ int main(int argc, char **argv) {
 	
 	blip_left = blip_new(4096);
 	blip_right = blip_new(4096);
-	blip_set_rates(blip_left, clock_rate, 44100.0);
-	blip_set_rates(blip_right, clock_rate, 44100.0);
+	blip_set_rates(blip_left, clock_rate, 44100);
+	blip_set_rates(blip_right, clock_rate, 44100);
 	
 	power_noise_t pn;
 	memset(&pn, 0, sizeof(pn));
@@ -336,6 +336,21 @@ int main(int argc, char **argv) {
 	SDL_AudioDeviceID dev = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
 	SDL_PauseAudioDevice(dev, 0);
 	
+	TinyWav out;
+	
+	if(argc > 2) {
+		if (tinywav_open_write(&out, 2, 44100, TW_INT16, TW_INTERLEAVED, argv[2])) {
+			printf("Warning: output file could not be opened, proceeding without it\n");
+			outFile = false;
+		}
+		else {
+			outFile = true;
+		}
+	}
+	else {
+		outFile = false;
+	}
+	
 	short aud_data[1024];
 	
 	while (1) {
@@ -345,11 +360,13 @@ int main(int argc, char **argv) {
 				uint8_t reg, val;
 				size = fread(&reg, 1, 1, fh);
 				if (size != 1) {
+					do {} while(SDL_GetQueuedAudioSize(dev) > 0);
 					SDL_PauseAudioDevice(dev, 1);
 					SDL_CloseAudioDevice(dev);
 					blip_delete(blip_left);
 					blip_delete(blip_right);
 					fclose(fh);
+					if (outFile) tinywav_close_write(&out);
 					SDL_Quit();
 					return 0;
 				}
@@ -357,11 +374,13 @@ int main(int argc, char **argv) {
 				if (reg == 0xff) {
 					size = fread(&sleep_cyc, 3, 1, fh);
 					if (size != 1) {
+						do {} while(SDL_GetQueuedAudioSize(dev) > 0);
 						SDL_PauseAudioDevice(dev, 1);
 						SDL_CloseAudioDevice(dev);
 						blip_delete(blip_left);
 						blip_delete(blip_right);
 						fclose(fh);
+						if (outFile) tinywav_close_write(&out);
 						SDL_Quit();
 						return 0;
 					}
@@ -370,11 +389,13 @@ int main(int argc, char **argv) {
 				else {
 					size = fread(&val, 1, 1, fh);
 					if (size != 1) {
+						do {} while(SDL_GetQueuedAudioSize(dev) > 0);
 						SDL_PauseAudioDevice(dev, 1);
 						SDL_CloseAudioDevice(dev);
 						blip_delete(blip_left);
 						blip_delete(blip_right);
 						fclose(fh);
+						if (outFile) tinywav_close_write(&out);
 						SDL_Quit();
 						return 0;
 					}
@@ -396,7 +417,9 @@ int main(int argc, char **argv) {
 		
 		int lsz = blip_read_samples(blip_left, aud_data, 512, 1);
 		int rsz = blip_read_samples(blip_right, aud_data + 1, 512, 1);
-		int len = ((lsz > rsz) ? lsz : rsz) * 2 * sizeof(short);
-		SDL_QueueAudio(dev, aud_data, len);
+		int sz = ((lsz > rsz) ? lsz : rsz);
+		SDL_QueueAudio(dev, aud_data, sz * 2 * sizeof(short));
+		
+		if (outFile) tinywav_write_f(&out, aud_data, sz);
 	}
 }
