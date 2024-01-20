@@ -272,8 +272,8 @@ void pwrnoise_step(power_noise_t *pn, int16_t *left, int16_t *right) {
 		final_right = 0;
 	}
 	
-	*left = (int16_t)(final_left * 65535 / 60 - 32708);
-	*right = (int16_t)(final_right * 65535 / 60 - 32708);
+	*left = (int16_t)(final_left * 65535 / 63 - 32768);
+	*right = (int16_t)(final_right * 65535 / 63 - 32768);
 }
 
 int main(int argc, const char **argv) {
