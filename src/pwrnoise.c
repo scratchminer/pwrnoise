@@ -78,7 +78,7 @@ void pwrnoise_noise_step(noise_channel_t *chan, uint16_t cycles) {
 			chan->prev = (uint8_t)(chan->lfsr >> 15);
 			uint16_t in = ((chan->lfsr >> chan->tapa) ^ (chan->tapb_enable ? (chan->lfsr >> chan->tapb) : 0)) & 0x0001;
 			chan->lfsr = (chan->lfsr << 1) | in;
-			chan->period_counter = chan->period + (chan->period_counter - 4096);
+			chan->period_counter -= 4096 - chan->period;
 		}
 	}
 	
@@ -97,8 +97,8 @@ typedef struct {
 	
 	uint8_t alength;
 	uint8_t blength;
-	uint8_t a;
-	uint8_t b;
+	uint16_t a;
+	uint16_t b;
 	bool portion;
 	
 	uint8_t aoffset;
@@ -188,7 +188,7 @@ void pwrnoise_slope_step(slope_channel_t *chan, uint16_t cycles, bool force_zero
 				}
 			}
 			
-			chan->period_counter = chan->period + (chan->period_counter - 4096);
+			chan->period_counter -= 4096 - chan->period;
 			
 			uint8_t left = chan->accum >> 3;
 			uint8_t right = chan->accum >> 3;
