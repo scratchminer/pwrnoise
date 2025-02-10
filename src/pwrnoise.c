@@ -279,14 +279,31 @@ void pwrnoise_step(power_noise_t *pn, uint16_t cycles, int16_t *left, int16_t *r
 		
 		final_left = (pn->n1.out_latch >> 4) + (pn->n2.out_latch >> 4) + (pn->n3.out_latch >> 4) + (pn->s.out_latch >> 4);
 		final_right = (pn->n1.out_latch & 0xf) + (pn->n2.out_latch & 0xf) + (pn->n3.out_latch & 0xf) + (pn->s.out_latch & 0xf);
+		
+		switch (pn->flags & 0x3) {
+			case 0:
+				final_left = 0;
+				final_right = 0;
+				break;
+			case 3:
+				final_left <<= 1;
+				final_right <<= 1;
+			case 2:
+				final_left <<= 1;
+				final_right <<= 1;
+			case 1:
+				final_left <<= 1;
+				final_right <<= 1;
+			default: break;
+		}
 	}
 	else {
 		final_left = 0;
 		final_right = 0;
 	}
 	
-	*left = (int16_t)((final_left * 65535 / 63 - 32768) * (pn->flags & 0x7) / 7);
-	*right = (int16_t)((final_right * 65535 / 63 - 32768) * (pn->flags & 0x7) / 7);
+	*left = (int16_t)((final_left * 65535 / 63 - 32768);
+	*right = (int16_t)((final_right * 65535 / 63 - 32768);
 }
 
 int main(int argc, const char **argv) {
